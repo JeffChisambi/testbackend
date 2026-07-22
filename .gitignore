@@ -31,3 +31,14 @@ coverage/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+/generated/prisma
+
+# AI Tooling & Metadata
+.claude/
+.windsurf/
+.agents/
+
+# IDE Files
+.vscode/
+.idea/
