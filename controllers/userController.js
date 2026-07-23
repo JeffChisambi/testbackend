@@ -1,5 +1,5 @@
-const { query } = require('../config/database');
 const { sendSuccess, sendError } = require('../utils/responseHandler');
+const { listUsers, getUserById: getUserByIdService, updateUserById, deleteUserById } = require('../services/userService');
 
 /**
  * Get All Users (Admin/Manager only)
@@ -8,15 +8,7 @@ const getUsers = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
-    const offset = (page - 1) * limit;
-
-    const [users] = await query(
-      'SELECT id, name, email, role, status, avatar, created_at FROM users ORDER BY id DESC LIMIT ? OFFSET ?',
-      [limit, offset]
-    );
-
-    const [totalRows] = await query('SELECT COUNT(*) as count FROM users');
-    const total = totalRows[0].count;
+    const { users, total } = await listUsers({ page, limit });
 
     return sendSuccess(res, 'Users retrieved successfully', {
       users,
@@ -35,16 +27,16 @@ const getUsers = async (req, res, next) => {
 /**
  * Get User By ID
  */
-const getUserById = async (req, res, next) => {
+const getUserByIdHandler = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const [users] = await query('SELECT id, name, email, role, status, avatar, created_at FROM users WHERE id = ?', [id]);
+    const user = await getUserByIdService(id);
 
-    if (users.length === 0) {
+    if (!user) {
       return sendError(res, 'User not found', 404);
     }
 
-    return sendSuccess(res, 'User details retrieved successfully', users[0]);
+    return sendSuccess(res, 'User details retrieved successfully', user);
   } catch (error) {
     next(error);
   }
@@ -58,19 +50,12 @@ const updateUser = async (req, res, next) => {
     const { id } = req.params;
     const { name, role, status } = req.body;
 
-    const [users] = await query('SELECT id FROM users WHERE id = ?', [id]);
-    if (users.length === 0) {
+    const updatedUser = await updateUserById(id, { name, role, status });
+    if (!updatedUser) {
       return sendError(res, 'User not found', 404);
     }
 
-    await query(
-      'UPDATE users SET name = COALESCE(?, name), role = COALESCE(?, role), status = COALESCE(?, status) WHERE id = ?',
-      [name, role, status, id]
-    );
-
-    const [updatedUsers] = await query('SELECT id, name, email, role, status, avatar FROM users WHERE id = ?', [id]);
-
-    return sendSuccess(res, 'User updated successfully', updatedUsers[0]);
+    return sendSuccess(res, 'User updated successfully', updatedUser);
   } catch (error) {
     next(error);
   }
@@ -83,12 +68,10 @@ const deleteUser = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const [users] = await query('SELECT id FROM users WHERE id = ?', [id]);
-    if (users.length === 0) {
+    const deleted = await deleteUserById(id);
+    if (!deleted) {
       return sendError(res, 'User not found', 404);
     }
-
-    await query('DELETE FROM users WHERE id = ?', [id]);
 
     return sendSuccess(res, 'User deleted successfully');
   } catch (error) {
@@ -98,7 +81,7 @@ const deleteUser = async (req, res, next) => {
 
 module.exports = {
   getUsers,
-  getUserById,
+  getUserById: getUserByIdHandler,
   updateUser,
   deleteUser
 };

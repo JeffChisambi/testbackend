@@ -1,14 +1,16 @@
+const dotenv = require('dotenv');
+dotenv.config();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
-require('dotenv').config();
 
 const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
-const { testConnection } = require('./config/database');
-
+const { connectDatabase, disconnectDatabase, getDatabaseHealth } = require('./config/database');
+const logger = require('./utils/logger');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 
@@ -16,22 +18,18 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
-
-// Security Headers
 app.use(helmet());
 
-// CORS Configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
   : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5000'];
 
 app.use(
   cors({
-    origin: function (origin, callback) {
+    origin(origin, callback) {
       if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) === -1) {
-        const msg = `CORS policy error: Origin ${origin} is not allowed.`;
-        return callback(new Error(msg), false);
+      if (!allowedOrigins.includes(origin)) {
+        return callback(new Error(`CORS policy error: Origin ${origin} is not allowed.`), false);
       }
       return callback(null, true);
     },
@@ -39,7 +37,6 @@ app.use(
   })
 );
 
-// Global Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
@@ -52,22 +49,13 @@ const limiter = rateLimit({
 });
 
 app.use('/api/', limiter);
-
-// Parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
-
-// Static File Uploads
 app.use('/uploads', express.static('uploads'));
-
-// Swagger UI Route
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// Mount API routes
 app.use('/api', routes);
 
-// Root System Info Endpoint
 app.get('/', (req, res) => {
   res.json({
     success: true,
@@ -90,22 +78,34 @@ app.get('/', (req, res) => {
   });
 });
 
-// Central Error Handler
 app.use(errorHandler);
 
-// Start Server
-const server = app.listen(PORT, async () => {
-  console.log(`🚀 IPC Grain Traceability System (GTMS-Backend) running on port ${PORT}`);
-  console.log(`📑 OpenAPI / Swagger Docs: http://localhost:${PORT}/api-docs`);
-  await testConnection();
+const startServer = async () => {
+  try {
+    await connectDatabase();
+    const server = app.listen(PORT, () => {
+      logger.info(`🚀 IPC Grain Traceability System (GTMS-Backend) running on port ${PORT}`);
+      logger.info(`📑 OpenAPI / Swagger Docs: http://localhost:${PORT}/api-docs`);
+    });
+
+    server.on('close', async () => {
+      await disconnectDatabase();
+    });
+  } catch (error) {
+    logger.error('Failed to start server', error);
+    process.exit(1);
+  }
+};
+
+process.on('unhandledRejection', (error) => {
+  logger.error('Unhandled Rejection:', error);
 });
 
-process.on('unhandledRejection', (err) => {
-  console.error('💥 Unhandled Rejection:', err);
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error);
+  process.exit(1);
 });
 
-process.on('uncaughtException', (err) => {
-  console.error('💥 Uncaught Exception:', err);
-});
+startServer();
 
 module.exports = app;

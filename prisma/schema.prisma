@@ -1,13 +1,359 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "mysql"
+}
+
+enum UserRole {
+  admin
+  registration_officer
+  extension_officer
+  marketing_officer
+  warehouse_officer
+  ipc_manager
+  headoffice_manager
+}
+
+enum UserStatus {
+  active
+  inactive
+  suspended
+}
+
+enum FarmerGender {
+  Male
+  Female
+  Other
+}
+
+enum FarmerStatus {
+  active
+  inactive
+}
+
+enum LoanStatus {
+  active
+  paid
+  defaulted
+}
+
+enum PurchaseStatus {
+  completed
+  cancelled
+}
+
+enum MovementType {
+  receipt
+  transfer_out
+  transfer_in
+  dispatch
+}
+
+enum NotificationType {
+  purchase_receipt
+  loan_alert
+  general
+}
+
+enum NotificationStatus {
+  sent
+  failed
+  queued
+}
+
+model Ipc {
+  id                 Int                  @id @default(autoincrement())
+  code               String               @unique @db.VarChar(20)
+  name               String               @db.VarChar(100)
+  region             String               @db.VarChar(50)
+  location           String?              @db.VarChar(150)
+  createdAt          DateTime             @default(now()) @map("created_at")
+  users              User[]
+  clubsAssociations  ClubsAssociation[]
+  warehouses        Warehouse[]
+  purchases          Purchase[]
+
+  @@map("ipcs")
+}
+
+model User {
+  id                  Int                  @id @default(autoincrement())
+  name                String               @db.VarChar(100)
+  email               String               @unique @db.VarChar(150)
+  phone               String?              @db.VarChar(30)
+  password            String               @db.VarChar(255)
+  role                UserRole             @default(registration_officer)
+  ipcId               Int?                 @map("ipc_id")
+  status              UserStatus           @default(active)
+  avatar              String?              @db.VarChar(255)
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  ipc                 Ipc?                 @relation(fields: [ipcId], references: [id], onDelete: SetNull)
+  farmersRegistered   Farmer[]             @relation("FarmerRegisteredBy")
+  purchases           Purchase[]           @relation("PurchaseOfficer")
+  goodsReceivedNotes  GoodsReceivedNote[]  @relation("GoodsReceivedBy")
+  stockMovements      StockMovement[]      @relation("MovementCreatedBy")
+  customerDeliveries  CustomerDelivery[]   @relation("DeliveryCreatedBy")
+  auditLogs           AuditLog[]
+
+  @@index([role], map: "idx_users_role")
+  @@index([ipcId], map: "idx_users_ipc_id")
+  @@map("users")
+}
+
+model ClubsAssociation {
+  id              Int       @id @default(autoincrement())
+  ipcId           Int       @map("ipc_id")
+  name            String    @db.VarChar(120)
+  associationName String?   @db.VarChar(120) @map("association_name")
+  zone            String?   @db.VarChar(100)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  ipc             Ipc       @relation(fields: [ipcId], references: [id], onDelete: Cascade)
+  farmers         Farmer[]
+
+  @@index([ipcId], map: "idx_clubs_ipc")
+  @@map("clubs_associations")
+}
+
+model Farmer {
+  id                  Int                  @id @default(autoincrement())
+  farmerId            String               @unique @db.VarChar(30) @map("farmer_id")
+  firstName           String               @db.VarChar(60) @map("first_name")
+  lastName            String               @db.VarChar(60) @map("last_name")
+  nrcId               String               @unique @db.VarChar(50) @map("nrc_id")
+  phone               String               @db.VarChar(30)
+  gender              FarmerGender
+  dateOfBirth         DateTime?            @map("date_of_birth")
+  address             String?              @db.Text
+  clubId              Int?                 @map("club_id")
+  gpsLatitude         Decimal?             @db.Decimal(10, 8) @map("gps_latitude")
+  gpsLongitude        Decimal?             @db.Decimal(11, 8) @map("gps_longitude")
+  fingerprintTemplate String?              @db.Text @map("fingerprint_template")
+  status              FarmerStatus         @default(active)
+  registeredByUserId  Int?                 @map("registered_by_user_id")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  club                ClubsAssociation?    @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  registeredBy        User?                @relation("FarmerRegisteredBy", fields: [registeredByUserId], references: [id], onDelete: SetNull)
+  crops               FarmerCrop[]
+  seedLoans           SeedLoan[]
+  purchases           Purchase[]
+  notifications       Notification[]
+
+  @@index([nrcId], map: "idx_farmer_nrc")
+  @@index([phone], map: "idx_farmer_phone")
+  @@index([clubId], map: "idx_farmer_club")
+  @@map("farmers")
+}
+
+model Commodity {
+  id                  Int                  @id @default(autoincrement())
+  name                String               @unique @db.VarChar(100)
+  code                String               @unique @db.VarChar(20)
+  unitOfMeasure       String               @default("KG") @map("unit_of_measure") @db.VarChar(20)
+  description         String?              @db.Text
+  createdAt           DateTime             @default(now()) @map("created_at")
+  varieties           CommodityVariety[]
+  farmerCrops         FarmerCrop[]
+  seedLoans           SeedLoan[]
+  purchases           Purchase[]
+  goodsReceivedNotes  GoodsReceivedNote[]
+  inventoryItems      Inventory[]
+  stockMovements      StockMovement[]
+  customerDeliveries  CustomerDelivery[]
+
+  @@map("commodities")
+}
+
+model CommodityVariety {
+  id           Int       @id @default(autoincrement())
+  commodityId  Int       @map("commodity_id")
+  varietyName  String    @db.VarChar(100) @map("variety_name")
+  description  String?   @db.Text
+  commodity    Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+
+  @@index([commodityId], map: "idx_varieties_commodity")
+  @@map("commodity_varieties")
+}
+
+model FarmerCrop {
+  id               Int       @id @default(autoincrement())
+  farmerId         Int       @map("farmer_id")
+  commodityId      Int       @map("commodity_id")
+  varietyId        Int?      @map("variety_id")
+  acreageHectares  Decimal   @default(0.00) @db.Decimal(8, 2) @map("acreage_hectares")
+  estimatedYieldKg Decimal   @default(0.00) @db.Decimal(10, 2) @map("estimated_yield_kg")
+  season           String?   @db.VarChar(30)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  farmer           Farmer    @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  commodity        Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+
+  @@map("farmer_crops")
+}
+
+model SeedLoan {
+  id           Int        @id @default(autoincrement())
+  farmerId     Int        @map("farmer_id")
+  commodityId  Int        @map("commodity_id")
+  loanAmount   Decimal    @db.Decimal(12, 2) @map("loan_amount")
+  loanBalance  Decimal    @db.Decimal(12, 2) @map("loan_balance")
+  issueDate    DateTime   @map("issue_date")
+  dueDate      DateTime?  @map("due_date")
+  status       LoanStatus @default(active)
+  notes        String?    @db.Text
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  farmer       Farmer     @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  commodity    Commodity  @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+
+  @@index([farmerId], map: "idx_loans_farmer")
+  @@map("seed_loans")
+}
+
+model Purchase {
+  id                  Int            @id @default(autoincrement())
+  purchaseRef         String         @unique @db.VarChar(30) @map("purchase_ref")
+  farmerId            Int            @map("farmer_id")
+  commodityId         Int            @map("commodity_id")
+  varietyId           Int?           @map("variety_id")
+  grade               String         @default("Grade A") @db.VarChar(20)
+  quantityKg          Decimal        @db.Decimal(10, 2) @map("quantity_kg")
+  unitPrice           Decimal        @db.Decimal(10, 2) @map("unit_price")
+  totalAmount         Decimal        @db.Decimal(12, 2) @map("total_amount")
+  loanRecoveredAmount Decimal        @default(0.00) @db.Decimal(12, 2) @map("loan_recovered_amount")
+  netPayout           Decimal        @db.Decimal(12, 2) @map("net_payout")
+  buyingCenterIpcId   Int            @map("buying_center_ipc_id")
+  officerUserId       Int            @map("officer_user_id")
+  gpsLatitude         Decimal?       @db.Decimal(10, 8) @map("gps_latitude")
+  gpsLongitude        Decimal?       @db.Decimal(11, 8) @map("gps_longitude")
+  status              PurchaseStatus @default(completed)
+  createdAt           DateTime       @default(now()) @map("created_at")
+  farmer              Farmer         @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  commodity           Commodity      @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  buyingCenter        Ipc            @relation(fields: [buyingCenterIpcId], references: [id], onDelete: Cascade)
+  officer             User           @relation("PurchaseOfficer", fields: [officerUserId], references: [id], onDelete: Cascade)
+  goodsReceivedNotes  GoodsReceivedNote[]
+
+  @@index([farmerId], map: "idx_purchases_farmer")
+  @@index([purchaseRef], map: "idx_purchases_ref")
+  @@map("purchases")
+}
+
+model Warehouse {
+  id                Int                  @id @default(autoincrement())
+  name              String               @db.VarChar(100)
+  ipcId             Int                  @map("ipc_id")
+  location          String               @db.VarChar(150)
+  capacityTonnes    Decimal              @default(1000.00) @db.Decimal(10, 2) @map("capacity_tonnes")
+  managerUserId     Int?                 @map("manager_user_id")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  ipc               Ipc                  @relation(fields: [ipcId], references: [id], onDelete: Cascade)
+  goodsReceivedNotes GoodsReceivedNote[]
+  inventoryItems    Inventory[]
+
+  @@map("warehouses")
+}
+
+model GoodsReceivedNote {
+  id                  Int       @id @default(autoincrement())
+  grnNumber           String    @unique @db.VarChar(30) @map("grn_number")
+  warehouseId         Int       @map("warehouse_id")
+  purchaseId          Int?      @map("purchase_id")
+  commodityId         Int       @map("commodity_id")
+  varietyId           Int?      @map("variety_id")
+  quantityReceivedKg  Decimal   @db.Decimal(10, 2) @map("quantity_received_kg")
+  grade               String    @default("Grade A") @db.VarChar(20)
+  documentUrl         String?   @db.VarChar(255) @map("document_url")
+  receivedByUserId    Int       @map("received_by_user_id")
+  notes               String?   @db.Text
+  createdAt           DateTime  @default(now()) @map("created_at")
+  warehouse           Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  purchase            Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  commodity           Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  receivedBy          User      @relation("GoodsReceivedBy", fields: [receivedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([grnNumber], map: "idx_grn_number")
+  @@map("goods_received_notes")
+}
+
+model Inventory {
+  id             Int      @id @default(autoincrement())
+  warehouseId    Int      @map("warehouse_id")
+  commodityId    Int      @map("commodity_id")
+  varietyId      Int?     @map("variety_id")
+  grade          String   @default("Grade A") @db.VarChar(20)
+  quantityKg     Decimal  @default(0.00) @db.Decimal(12, 2) @map("quantity_kg")
+  minThresholdKg Decimal  @default(500.00) @db.Decimal(12, 2) @map("min_threshold_kg")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  warehouse      Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  commodity      Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+
+  @@unique([warehouseId, commodityId, varietyId, grade], map: "uk_wh_comm_var_grade")
+  @@map("inventory")
+}
+
+model StockMovement {
+  id                Int          @id @default(autoincrement())
+  movementType      MovementType @map("movement_type")
+  sourceWarehouseId Int?         @map("source_warehouse_id")
+  destWarehouseId   Int?         @map("dest_warehouse_id")
+  commodityId       Int          @map("commodity_id")
+  varietyId         Int?         @map("variety_id")
+  grade             String       @default("Grade A") @db.VarChar(20)
+  quantityKg        Decimal      @db.Decimal(10, 2) @map("quantity_kg")
+  referenceNo       String?      @db.VarChar(50) @map("reference_no")
+  createdByUserId   Int          @map("created_by_user_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  commodity         Commodity    @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  createdBy         User         @relation("MovementCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@map("stock_movements")
+}
+
+model CustomerDelivery {
+  id              Int       @id @default(autoincrement())
+  deliveryRef     String    @unique @db.VarChar(30) @map("delivery_ref")
+  warehouseId     Int       @map("warehouse_id")
+  grnId           Int?      @map("grn_id")
+  customerName    String    @db.VarChar(150) @map("customer_name")
+  commodityId     Int       @map("commodity_id")
+  varietyId       Int?      @map("variety_id")
+  quantityKg      Decimal   @db.Decimal(10, 2) @map("quantity_kg")
+  dispatchDate    DateTime  @map("dispatch_date")
+  createdByUserId Int       @map("created_by_user_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  commodity       Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+  createdBy       User      @relation("DeliveryCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@map("customer_deliveries")
+}
+
+model Notification {
+  id           Int                @id @default(autoincrement())
+  farmerId     Int?               @map("farmer_id")
+  phone        String             @db.VarChar(30)
+  message      String             @db.Text
+  type         NotificationType   @default(purchase_receipt)
+  status       NotificationStatus @default(sent)
+  sentAt       DateTime           @default(now()) @map("sent_at")
+  farmer       Farmer?            @relation(fields: [farmerId], references: [id], onDelete: SetNull)
+
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?     @map("user_id")
+  action     String   @db.VarChar(100)
+  entityType String?  @db.VarChar(50) @map("entity_type")
+  entityId   Int?     @map("entity_id")
+  details    String?  @db.Text
+  ipAddress  String?  @db.VarChar(45) @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId], map: "idx_audit_user")
+  @@map("audit_logs")
 }

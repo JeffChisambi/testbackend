@@ -1,4 +1,4 @@
-const { testConnection } = require('../config/database');
+const { getDatabaseHealth } = require('../config/database');
 const { sendSuccess } = require('../utils/responseHandler');
 
 /**
@@ -6,14 +6,15 @@ const { sendSuccess } = require('../utils/responseHandler');
  */
 const getHealthStatus = async (req, res, next) => {
   try {
-    const dbConnected = await testConnection();
+    const health = await getDatabaseHealth();
 
     return sendSuccess(res, 'GTMS Backend Service is operating normally', {
-      status: 'UP',
+      status: health.status === 'UP' ? 'UP' : 'DOWN',
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
-      database: dbConnected ? 'CONNECTED' : 'DISCONNECTED',
-      environment: process.env.NODE_ENV || 'development'
+      database: health.connected ? 'CONNECTED' : 'DISCONNECTED',
+      environment: process.env.NODE_ENV || 'development',
+      details: health
     });
   } catch (error) {
     next(error);

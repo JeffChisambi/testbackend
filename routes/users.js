@@ -12,7 +12,7 @@ const { authenticate, authorize } = require('../middleware/auth');
  *     security:
  *       - bearerAuth: []
  */
-router.get('/', authenticate, authorize('admin', 'manager'), getUsers);
+router.get('/', authenticate, authorize('admin', 'ipc_manager', 'headoffice_manager'), getUsers);
 
 /**
  * @swagger

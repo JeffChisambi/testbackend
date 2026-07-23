@@ -1,32 +1,64 @@
-const mysql = require('mysql2/promise');
-require('dotenv').config();
+const prisma = require('../lib/prisma');
+const logger = require('../utils/logger');
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306,
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'gtms_database',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+let isConnected = false;
 
-// Test connection helper
+const connectDatabase = async () => {
+  if (isConnected) return prisma;
+
+  try {
+    await prisma.$connect();
+    await prisma.$queryRawUnsafe('SELECT 1');
+    isConnected = true;
+    logger.info('✅ Connected to database via Prisma');
+    return prisma;
+  } catch (error) {
+    logger.error('Database connection failed', error);
+    throw error;
+  }
+};
+
+const disconnectDatabase = async () => {
+  if (!isConnected) return;
+  await prisma.$disconnect();
+  isConnected = false;
+};
+
+const getDatabaseHealth = async () => {
+  try {
+    await connectDatabase();
+    return { status: 'UP', connected: true };
+  } catch (error) {
+    return { status: 'DOWN', connected: false, error: error.message };
+  }
+};
+
 const testConnection = async () => {
   try {
-    const connection = await pool.getConnection();
-    console.log('✅ Connected to MySQL Database:', process.env.DB_NAME || 'gtms_database');
-    connection.release();
+    await connectDatabase();
     return true;
   } catch (error) {
-    console.warn('⚠️ Database Connection Warning:', error.message);
     return false;
   }
 };
 
+const query = async (sql, params = []) => {
+  if (Array.isArray(params) && params.length > 0) {
+    return prisma.$queryRawUnsafe(sql, ...params);
+  }
+
+  if (params && typeof params === 'object' && !Array.isArray(params)) {
+    return prisma.$queryRawUnsafe(sql, params);
+  }
+
+  return prisma.$queryRawUnsafe(sql);
+};
+
 module.exports = {
-  pool,
-  query: (sql, params) => pool.execute(sql, params),
+  prisma,
+  query,
+  connectDatabase,
+  disconnectDatabase,
+  getDatabaseHealth,
   testConnection
 };

@@ -1,12 +1,12 @@
-const { query } = require('../config/database');
+const prisma = require('../lib/prisma');
 
 /**
  * Generate formatted unique reference IDs
  */
 const generateFarmerId = async () => {
   const year = new Date().getFullYear();
-  const [rows] = await query('SELECT COUNT(*) as count FROM farmers');
-  const count = rows[0].count + 1;
+  const [rows] = await prisma.$queryRawUnsafe('SELECT COUNT(*) as count FROM farmers');
+  const count = Number(rows.count) + 1;
   const sequence = String(count).padStart(5, '0');
   return `FARM-${year}-${sequence}`;
 };
