@@ -1,29 +1,22 @@
 {
   "name": "gtms-backend",
-  "version": "1.0.0",
-  "description": "GTMS API Server with Authentication and Modular Architecture",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "GTMS API Server — Grain Traceability Management System (TypeScript, MySQL, Prisma)",
+  "main": "dist/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "dev": "tsx watch server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc --noEmit false",
     "test": "jest --runInBand",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev --name init"
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
   },
-  "keywords": [
-    "gtms",
-    "express",
-    "mysql",
-    "jwt",
-    "authentication",
-    "api"
-  ],
+  "keywords": ["gtms", "express", "typescript", "mysql", "prisma", "jwt"],
   "author": "DreamCode Developers",
   "license": "ISC",
   "dependencies": {
-    "@prisma/adapter-mariadb": "^7.9.0",
     "@prisma/client": "^7.9.0",
-    "bcrypt": "^6.0.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
@@ -45,20 +38,29 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/cors": "^2.8.18",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/morgan": "^1.9.9",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.15.32",
+    "@types/swagger-jsdoc": "^6.0.4",
+    "@types/swagger-ui-express": "^4.1.8",
+    "@types/express": "^5.0.3",
     "jest": "^29.7.0",
     "nodemon": "^3.0.2",
-    "supertest": "^7.2.2"
+    "supertest": "^7.2.2",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
   },
   "jest": {
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "transform": { "^.+\\.tsx?$": ["ts-jest", {}] }
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/DreamCode-Developers/GTMS-Backend.git"
   },
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/DreamCode-Developers/GTMS-Backend/issues"
-  },
-  "homepage": "https://github.com/DreamCode-Developers/GTMS-Backend#readme"
+  "type": "commonjs"
 }

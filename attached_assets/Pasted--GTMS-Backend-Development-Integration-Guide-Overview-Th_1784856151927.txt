@@ -1,0 +1,171 @@
+# GTMS Backend Development & Integration Guide
+
+## Overview
+This document provides a comprehensive guide for developing a production-ready Express.js backend for the NASFAM Grain Traceability Management System (GTMS) and integrating it with the existing Next.js frontend. 
+
+The frontend currently relies on mock data and LocalStorage. The goal of this phase is to replace the mock data layer with robust RESTful APIs, implementing proper authentication, Role-Based Access Control (RBAC), and persistent data storage.
+
+---
+
+## 1. Technology Stack Recommendation
+
+To build a scalable, enterprise-grade backend that pairs well with the Next.js frontend, the following stack is recommended:
+
+*   **Runtime:** Node.js (v20+ LTS)
+*   **Framework:** Express.js
+*   **Language:** TypeScript (Strictly recommended for type safety and maintaining contracts with the frontend)
+*   **Database:** Mysql (Ideal for relational data like Users, Roles, IPCs, and Warehouses)
+*   **ORM:** Prisma or TypeORM (Prisma is highly recommended for its developer experience and type safety)
+*   **Authentication:** JSON Web Tokens (JWT) with HTTP-only cookies
+*   **Validation:** Zod or Joi (Zod pairs perfectly with TypeScript)
+*   **Logging:** Winston and Morgan
+*   **Testing:** Jest and Supertest
+
+---
+
+## 2. Recommended Project Structure
+
+Use a modular, feature-based architecture to keep the backend scalable and maintainable, mirroring the frontend's feature modules.
+
+```text
+src/
+├── config/             # Environment variables, DB connection, logger setup
+├── middlewares/        # Global middlewares (auth, error handling, rate limiting)
+├── modules/            # Feature-based modules
+│   ├── auth/           # Login, token generation, password reset
+│   ├── users/          # CRUD for users
+│   ├── ipcs/           # IPC management
+│   ├── warehouses/     # Warehouse operations
+│   ├── farmers/        # Farmer registration & tracking
+│   ├── purchases/      # Purchasing records
+│   ├── sync/           # Mobile synchronization handling
+│   └── audit/          # System audit logs
+├── utils/              # Helper functions (hashing, formatting)
+├── types/              # Global TypeScript interfaces
+└── app.ts              # Express app initialization
+```
+
+---
+
+## 3. Database Schema Design (Relational Core)
+
+Based on the `IMPLEMENTATION_SUMMARY.md`, here are the core entities you need to model in PostgreSQL:
+
+1.  **Users:** `id`, `email`, `password_hash`, `first_name`, `last_name`, `role_id`, `ipc_id` (nullable), `status`, `created_at`, `updated_at`.
+2.  **Roles:** `id`, `name` (e.g., SYSTEM_ADMIN, WAREHOUSE_OFFICER, IPC_MANAGER, HEAD_OFFICE).
+3.  **IPCs:** `id`, `name`, `location`, `capacity`, `manager_id`.
+4.  **Warehouses:** `id`, `ipc_id`, `name`, `capacity`, `current_stock`, `status`.
+5.  **Farmers:** `id`, `ipc_id`, `first_name`, `last_name`, `contact`, `registered_by` (user_id), `sync_status`.
+6.  **Purchases:** `id`, `farmer_id`, `warehouse_id`, `commodity`, `weight`, `price`, `recorded_by`, `sync_status`.
+7.  **SyncLogs:** `id`, `device_id`, `user_id`, `status` (SUCCESS, FAILED, PENDING), `records_processed`, `timestamp`.
+8.  **AuditLogs:** `id`, `user_id`, `action`, `module`, `description`, `severity`, `timestamp`.
+
+---
+
+## 4. API Endpoints Contract
+
+The backend should expose RESTful endpoints grouped by resource. Standardize responses (e.g., `{ status: "success", data: {...}, message: "..." }`).
+
+### Auth & Users
+*   `POST /api/v1/auth/login` - Authenticate and return JWT (set in HTTP-only cookie).
+*   `POST /api/v1/auth/logout` - Clear JWT cookie.
+*   `GET /api/v1/users/me` - Get current authenticated user profile.
+*   `GET /api/v1/users` - List all users (Admin only).
+*   `POST /api/v1/users` - Create a new user (Admin only).
+
+### IPCs & Warehouses
+*   `GET /api/v1/ipcs` - List IPCs (Filtered by user role/IPC assignment).
+*   `GET /api/v1/warehouses` - List warehouses.
+*   `POST /api/v1/warehouses/:id/stock` - Update warehouse stock (Warehouse Officer).
+
+### Sync Management (Mobile App Integration)
+*   `POST /api/v1/sync/upload` - Endpoint for mobile devices to push local SQLite data.
+*   `GET /api/v1/sync/status` - Dashboard metrics for sync management.
+*   `GET /api/v1/sync/history` - List sync logs.
+
+### Audit Logs
+*   `GET /api/v1/audit-logs` - Retrieve system activity logs (Admin only, requires pagination & filtering).
+*   *Note: Audit logs should be created internally via a middleware or service hook, not via a public POST endpoint.*
+
+---
+
+## 5. Security & RBAC Implementation
+
+### Authentication Middleware
+Extract the JWT from the HTTP-only cookie, verify it, and attach the user payload to the `req` object.
+
+### Role-Based Authorization Middleware
+Create a middleware factory to enforce roles mirroring the frontend `RBAC_NAV_ITEMS`.
+
+```typescript
+// Example Middleware
+export const authorize = (allowedRoles: string[]) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const userRole = req.user?.role;
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      return res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
+    }
+    next();
+  };
+};
+
+// Usage
+router.get('/audit-logs', authorize(['SYSTEM_ADMIN']), auditController.getLogs);
+```
+
+### General Security Best Practices
+1.  **Helmet:** Use `helmet` to set secure HTTP headers.
+2.  **CORS:** Configure CORS to strictly allow the Next.js frontend domain (e.g., `http://localhost:3000` in dev). Must support credentials (`credentials: true`) to allow cookies.
+3.  **Rate Limiting:** Implement `express-rate-limit` on the `/login` and `/sync` endpoints to prevent brute-force and DDoS attacks.
+4.  **Data Validation:** Never trust client data. Validate all incoming `req.body` and `req.query` using Zod before it reaches the controller.
+
+---
+
+## 6. Frontend Integration Strategy (Transitioning from Mock Data)
+
+To seamlessly transition the Next.js frontend from the current mock data to the new Express backend:
+
+### Step 1: Create an API Client Setup
+Create a centralized Axios instance in `src/lib/apiClient.js` (or `.ts`) on the frontend. Configure it to include credentials so cookies are sent automatically.
+
+```javascript
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1',
+  withCredentials: true, // Crucial for sending/receiving HTTP-only cookies
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+export default api;
+```
+
+### Step 2: Replace Mock Services
+Currently, data is fetched via context or mock imports (e.g., `import { mockUsers } from "@/auth/mockUsers"`).
+1.  Create service files (e.g., `src/services/userService.js`).
+2.  Write asynchronous functions that call the API:
+    ```javascript
+    export const fetchUsers = async () => {
+      const response = await api.get('/users');
+      return response.data;
+    };
+    ```
+3.  Swap out the mock data arrays in your React components/Contexts with these `useEffect` or React Query/SWR calls.
+
+### Step 3: Auth Context Update
+Modify the existing `AuthContext` to validate sessions via the backend rather than LocalStorage.
+1.  On app load, call `GET /api/v1/users/me`.
+2.  If successful, set the user in state. If 401, redirect to `/login`.
+3.  Update the `login` function in the context to post credentials to the backend.
+
+---
+
+## 7. Next Steps for the Backend Developer
+
+1.  **Initialize Project:** Run `npm init -y`, install `express`, `typescript`, `prisma`, and basic middlewares.
+2.  **Database Setup:** Define the `schema.prisma` based on the data models described above. Run migrations to create the local PostgreSQL database.
+3.  **Build Auth Module:** Implement login, password hashing (bcrypt), and JWT generation first.
+4.  **Build Core CRUD:** Implement endpoints for IPCs, Warehouses, and Users.
+5.  **Test Integration:** Start the Next.js app, replace the `mockUsers.js` logic with an API call, and verify login works end-to-end.
