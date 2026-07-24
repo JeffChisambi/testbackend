@@ -1,4 +1,3 @@
-import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../../config/database';
 import { paginate } from '../../types';
 import { generatePurchaseRef } from '../../utils/idGenerator';
@@ -47,7 +46,7 @@ export async function getPurchaseByReceipt(purchaseRef: string) {
 }
 
 export async function createPurchase(input: CreatePurchaseInput, officerUserId: number) {
-  // Idempotency: if a uuid is provided and already exists, return existing record
+  // Idempotency: if a UUID is provided and already exists, return existing record
   if (input.uuid) {
     const existing = await prisma.purchase.findUnique({ where: { uuid: input.uuid } });
     if (existing) return existing;
@@ -57,7 +56,7 @@ export async function createPurchase(input: CreatePurchaseInput, officerUserId: 
     const farmer = await tx.farmer.findUnique({ where: { id: input.farmerId } });
     if (!farmer) throw Object.assign(new Error('Farmer not found'), { status: 404 });
 
-    const totalAmount = new Decimal(input.quantityKg).mul(input.unitPrice);
+    const totalAmount = Number(input.quantityKg) * Number(input.unitPrice);
 
     // Loan recovery: max 50% of total unless manual override
     const activeLoans = await tx.seedLoan.findMany({
@@ -65,35 +64,31 @@ export async function createPurchase(input: CreatePurchaseInput, officerUserId: 
       orderBy: { createdAt: 'asc' },
     });
 
-    let recovered = new Decimal(0);
-    const maxRecovery = totalAmount.mul(0.5);
+    let recovered = 0;
+    const maxRecovery = totalAmount * 0.5;
 
     if (activeLoans.length > 0) {
-      const totalBalance = activeLoans.reduce((s, l) => s.add(l.loanBalance), new Decimal(0));
+      const totalBalance = activeLoans.reduce((s, l) => s + Number(l.loanBalance), 0);
       const cap = input.manualLoanDeduction != null
-        ? new Decimal(Math.min(input.manualLoanDeduction, totalBalance.toNumber(), maxRecovery.toNumber()))
-        : Decimal.min(totalBalance, maxRecovery);
+        ? Math.min(input.manualLoanDeduction, totalBalance, maxRecovery)
+        : Math.min(totalBalance, maxRecovery);
 
       recovered = cap;
-
-      // Deduct from loans oldest-first
       let remaining = recovered;
+
       for (const loan of activeLoans) {
-        if (remaining.lte(0)) break;
-        const deduct = Decimal.min(remaining, loan.loanBalance);
-        const newBalance = new Decimal(loan.loanBalance).sub(deduct);
+        if (remaining <= 0) break;
+        const deduct = Math.min(remaining, Number(loan.loanBalance));
+        const newBalance = Number(loan.loanBalance) - deduct;
         await tx.seedLoan.update({
           where: { id: loan.id },
-          data: {
-            loanBalance: newBalance,
-            status: newBalance.lte(0.01) ? 'paid' : 'active',
-          },
+          data: { loanBalance: newBalance, status: newBalance <= 0.01 ? 'paid' : 'active' },
         });
-        remaining = remaining.sub(deduct);
+        remaining -= deduct;
       }
     }
 
-    const netPayout = totalAmount.sub(recovered);
+    const netPayout = totalAmount - recovered;
 
     const purchase = await tx.purchase.create({
       data: {
@@ -121,7 +116,7 @@ export async function createPurchase(input: CreatePurchaseInput, officerUserId: 
       data: {
         farmerId: input.farmerId,
         phone: farmer.phone,
-        message: `Purchase recorded: ${input.quantityKg}kg @ K${input.unitPrice}/kg. Total: K${totalAmount}. Loan recovered: K${recovered}. Net payout: K${netPayout}. Ref: ${purchase.purchaseRef}`,
+        message: `Purchase recorded: ${input.quantityKg}kg @ K${input.unitPrice}/kg. Total: K${totalAmount.toFixed(2)}. Loan recovered: K${recovered.toFixed(2)}. Net payout: K${netPayout.toFixed(2)}. Ref: ${purchase.purchaseRef}`,
         type: 'purchase_receipt',
       },
     });

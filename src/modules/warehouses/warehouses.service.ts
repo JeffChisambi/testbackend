@@ -1,4 +1,3 @@
-import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../../config/database';
 import { paginate } from '../../types';
 import { generateGrnNumber } from '../../utils/idGenerator';
@@ -41,33 +40,44 @@ export async function updateWarehouse(id: number, input: Partial<CreateWarehouse
   return prisma.warehouse.update({ where: { id }, data: input });
 }
 
+/** Upsert an inventory row — works correctly with nullable varietyId */
+async function upsertInventory(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  warehouseId: number,
+  commodityId: number,
+  varietyId: number | null,
+  grade: string,
+  incrementKg: number
+) {
+  const existing = await tx.inventory.findFirst({
+    where: { warehouseId, commodityId, varietyId, grade },
+  });
+  if (existing) {
+    await tx.inventory.update({
+      where: { id: existing.id },
+      data: { quantityKg: { increment: incrementKg } },
+    });
+  } else {
+    await tx.inventory.create({
+      data: { warehouseId, commodityId, varietyId, grade, quantityKg: incrementKg },
+    });
+  }
+}
+
 export async function receiveGoods(input: GrnInput, receivedByUserId: number) {
   const grnNumber = generateGrnNumber();
   return prisma.$transaction(async (tx) => {
-    // Create GRN
     const grn = await tx.goodsReceivedNote.create({
       data: { ...input, grnNumber, receivedByUserId },
     });
-    // Upsert inventory
-    await tx.inventory.upsert({
-      where: {
-        uk_wh_comm_var_grade: {
-          warehouseId: input.warehouseId,
-          commodityId: input.commodityId,
-          varietyId: input.varietyId ?? null,
-          grade: input.grade ?? 'Grade A',
-        },
-      },
-      create: {
-        warehouseId: input.warehouseId,
-        commodityId: input.commodityId,
-        varietyId: input.varietyId ?? null,
-        grade: input.grade ?? 'Grade A',
-        quantityKg: input.quantityReceivedKg,
-      },
-      update: { quantityKg: { increment: input.quantityReceivedKg } },
-    });
-    // Record movement
+    await upsertInventory(
+      tx,
+      input.warehouseId,
+      input.commodityId,
+      input.varietyId ?? null,
+      input.grade ?? 'Grade A',
+      input.quantityReceivedKg
+    );
     await tx.stockMovement.create({
       data: {
         movementType: 'receipt',
@@ -86,16 +96,16 @@ export async function receiveGoods(input: GrnInput, receivedByUserId: number) {
 
 export async function transferStock(input: StockTransferInput, userId: number) {
   return prisma.$transaction(async (tx) => {
-    // Check source stock
+    const grade = input.grade ?? 'Grade A';
     const source = await tx.inventory.findFirst({
       where: {
         warehouseId: input.sourceWarehouseId,
         commodityId: input.commodityId,
-        grade: input.grade ?? 'Grade A',
-        ...(input.varietyId ? { varietyId: input.varietyId } : {}),
+        varietyId: input.varietyId ?? null,
+        grade,
       },
     });
-    if (!source || new Decimal(source.quantityKg).lessThan(input.quantityKg)) {
+    if (!source || Number(source.quantityKg) < input.quantityKg) {
       throw Object.assign(new Error('Insufficient stock in source warehouse'), { status: 400 });
     }
     // Decrement source
@@ -104,25 +114,14 @@ export async function transferStock(input: StockTransferInput, userId: number) {
       data: { quantityKg: { decrement: input.quantityKg } },
     });
     // Upsert destination
-    await tx.inventory.upsert({
-      where: {
-        uk_wh_comm_var_grade: {
-          warehouseId: input.destWarehouseId,
-          commodityId: input.commodityId,
-          varietyId: input.varietyId ?? null,
-          grade: input.grade ?? 'Grade A',
-        },
-      },
-      create: {
-        warehouseId: input.destWarehouseId,
-        commodityId: input.commodityId,
-        varietyId: input.varietyId ?? null,
-        grade: input.grade ?? 'Grade A',
-        quantityKg: input.quantityKg,
-      },
-      update: { quantityKg: { increment: input.quantityKg } },
-    });
-    // Record two movements
+    await upsertInventory(
+      tx,
+      input.destWarehouseId,
+      input.commodityId,
+      input.varietyId ?? null,
+      grade,
+      input.quantityKg
+    );
     await tx.stockMovement.createMany({
       data: [
         {
@@ -130,7 +129,7 @@ export async function transferStock(input: StockTransferInput, userId: number) {
           sourceWarehouseId: input.sourceWarehouseId,
           commodityId: input.commodityId,
           varietyId: input.varietyId ?? null,
-          grade: input.grade ?? 'Grade A',
+          grade,
           quantityKg: input.quantityKg,
           referenceNo: input.referenceNo ?? null,
           createdByUserId: userId,
@@ -140,7 +139,7 @@ export async function transferStock(input: StockTransferInput, userId: number) {
           destWarehouseId: input.destWarehouseId,
           commodityId: input.commodityId,
           varietyId: input.varietyId ?? null,
-          grade: input.grade ?? 'Grade A',
+          grade,
           quantityKg: input.quantityKg,
           referenceNo: input.referenceNo ?? null,
           createdByUserId: userId,

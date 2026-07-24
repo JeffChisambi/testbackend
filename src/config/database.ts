@@ -1,15 +1,20 @@
 import { PrismaClient } from '@prisma/client';
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { env } from './env';
 
-// Prevent multiple instances in dev (hot-reload)
+// Prevent multiple PrismaClient instances in dev (hot-reload)
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
+function createPrismaClient(): PrismaClient {
+  // PrismaMariaDb accepts a connection URI string directly
+  const adapter = new PrismaMariaDb(env.DATABASE_URL);
+  return new PrismaClient({
+    adapter,
     log: env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   });
+}
 
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 if (env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 export async function connectDatabase(): Promise<void> {

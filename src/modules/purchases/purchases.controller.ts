@@ -24,7 +24,7 @@ export async function getOne(req: AuthRequest, res: Response, next: NextFunction
 
 export async function getByReceipt(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    sendSuccess(res, await svc.getPurchaseByReceipt(req.params.ref), 'Purchase retrieved');
+    sendSuccess(res, await svc.getPurchaseByReceipt(req.params['ref'] as string), 'Purchase retrieved');
   } catch (err) { next(err); }
 }
 

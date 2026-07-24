@@ -1,4 +1,3 @@
-import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../../config/database';
 import { paginate } from '../../types';
 import { IssueLoanInput } from './seed-loans.schema';
@@ -51,15 +50,12 @@ export async function recordPayment(id: number, amount: number) {
   const loan = await getLoanById(id);
   if (loan.status !== 'active') throw Object.assign(new Error('Loan is not active'), { status: 400 });
 
-  const newBalance = new Decimal(loan.loanBalance).sub(amount);
-  if (newBalance.lt(0)) throw Object.assign(new Error('Payment exceeds outstanding balance'), { status: 400 });
+  const newBalance = Number(loan.loanBalance) - amount;
+  if (newBalance < 0) throw Object.assign(new Error('Payment exceeds outstanding balance'), { status: 400 });
 
   return prisma.seedLoan.update({
     where: { id },
-    data: {
-      loanBalance: newBalance,
-      status: newBalance.lte(0.01) ? 'paid' : 'active',
-    },
+    data: { loanBalance: newBalance, status: newBalance <= 0.01 ? 'paid' : 'active' },
     include: LOAN_INCLUDE,
   });
 }
